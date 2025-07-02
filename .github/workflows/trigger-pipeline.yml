@@ -1,0 +1,77 @@
+name: Trigger MLOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-ml-model:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Start Step Function Execution
+      id: stepfn_start
+      run: |
+        EXECUTION_NAME="workflow-execution-$(date +%s)"
+        EXECUTION_ARN=$(aws stepfunctions start-execution \
+          --state-machine-arn "${{ secrets.STEP_FUNCTION_ARN }}" \
+          --name "$EXECUTION_NAME" \
+          --input "{}" \
+          --query "executionArn" \
+          --output text)
+
+        echo "execution_arn=$EXECUTION_ARN" >> $GITHUB_OUTPUT
+        echo "execution_name=$EXECUTION_NAME" >> $GITHUB_OUTPUT
+
+    - name: Wait for Step Function to Complete
+      id: wait_stepfn
+      run: |
+        STATUS="RUNNING"
+        while [ "$STATUS" == "RUNNING" ]; do
+          STATUS=$(aws stepfunctions describe-execution \
+            --execution-arn "${{ steps.stepfn_start.outputs.execution_arn }}" \
+            --query "status" \
+            --output text)
+          echo "Current status: $STATUS"
+          sleep 10
+        done
+
+        if [ "$STATUS" != "SUCCEEDED" ]; then
+          echo "Step Function failed with status: $STATUS"
+          exit 1
+        fi
+
+    - name: Get Step Function Output
+      id: get_output
+      run: |
+        OUTPUT=$(aws stepfunctions describe-execution \
+          --execution-arn "${{ steps.stepfn_start.outputs.execution_arn }}" \
+          --query "output" \
+          --output text)
+
+        # Extract endpoint_name from JSON output (ensure it's included in Step Function output!)
+        ENDPOINT_NAME=$(echo $OUTPUT | jq -r '.CreateEndpoint.EndpointName')
+        echo "Extracted endpoint: $ENDPOINT_NAME"
+
+        echo "endpoint_name=$ENDPOINT_NAME" >> $GITHUB_OUTPUT
+
+    - name: Call REST API with endpoint
+      run: |
+        curl -X POST https://newngvg299.execute-api.us-east-1.amazonaws.com/prod/predict \
+          -H "Content-Type: application/json" \
+          -d '{
+            "features": [5.1, 3.5, 1.4, 0.2],
+            "endpoint_name": "${{ steps.get_output.outputs.endpoint_name }}"
+          }'
+
