@@ -74,4 +74,3 @@ jobs:
             "features": [5.1, 3.5, 1.4, 0.2],
             "endpoint_name": "${{ steps.get_output.outputs.endpoint_name }}"
           }'
-
