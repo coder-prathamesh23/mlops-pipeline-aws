@@ -37,5 +37,5 @@ graph TD
 ├── lambda-preprocess-container/     # Dockerized Lambda for preprocessing
 ├── step-functions/                  # Step Function definition JSON
 ├── README.md
-└── ...
+└── ....
 
